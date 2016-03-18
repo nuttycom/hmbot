@@ -1,11 +1,13 @@
 {-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
-module HmBot (runApp, app) where
+module HmBot 
+  --(runApp, app) 
+  where
 
 import           Control.Monad.IO.Class
 import           Data.Aeson (Value(..), object, (.=))
 import qualified Data.Map.Lazy as M
 import           Data.Text
-import           Text.Parsec (many, manyTill)
+import           Text.Parsec (many, manyTill, skipMany)
 import           Text.Parsec.Text
 import           Text.Parsec.Char (char, noneOf, anyChar)
 
@@ -62,7 +64,10 @@ handlePost :: SlackPost -> IO Text
 handlePost p = pure "hi"
 
 allBracketed :: Parser [Text]
-allBracketed = many (noneOf "[" >> bracketed)
+allBracketed = many (ignored *> bracketed <* ignored)
+
+ignored :: Parser ()
+ignored = skipMany (noneOf "[")
 
 bracketed :: Parser Text
 bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
