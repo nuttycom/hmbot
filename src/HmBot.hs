@@ -3,15 +3,22 @@ module HmBot
   --(runApp, app) 
   where
 
+import           Control.Lens ((&), (.~))
+import           Control.Monad.Except
 import           Control.Monad.IO.Class
+
 import           Data.Aeson (Value(..), object, (.=))
+import           Data.Either.Combinators (mapLeft)
 import qualified Data.Map.Lazy as M
 import           Data.Text
-import           Text.Parsec (many, manyTill, skipMany)
+
+import           Text.Parsec (many, manyTill, parse, skipMany)
+import           Text.Parsec.Error
 import           Text.Parsec.Text
 import           Text.Parsec.Char (char, noneOf, anyChar)
 
 import           Network.Wai (Application)
+import           Network.Wreq
 import qualified Web.Scotty as S
 
 runApp :: IO ()
@@ -48,6 +55,11 @@ data SlackPost = SlackPost
   , text :: Text
   , triggerWord :: Text
   }
+
+data HmError 
+  = ParseFailure [Message]
+  | NotFound [Text]
+  
      
 readPost :: S.ActionM SlackPost
 readPost = 
@@ -60,8 +72,15 @@ readPost =
             <*> S.param "text"
             <*> S.param "trigger_word"
 
-handlePost :: SlackPost -> IO Text
-handlePost p = pure "hi"
+handlePost :: SlackPost -> ExceptT HmError IO Text
+handlePost p = do
+  cardNames <- ExceptT . pure $ mapLeft (ParseFailure . errorMessages) $ commands p
+  cardData  <- lift lookupCard  
+
+
+
+commands :: SlackPost -> Either ParseError [Text]
+commands p = parse allBracketed (text p) (text p)
 
 allBracketed :: Parser [Text]
 allBracketed = many (ignored *> bracketed <* ignored)
@@ -72,3 +91,9 @@ ignored = skipMany (noneOf "[")
 bracketed :: Parser Text
 bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
 
+lookupCard :: Text -> IO Value
+lookupCard cardName = 
+  let opts = defaults & param "name" .~ [cardName]
+  in  asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
+
+  
