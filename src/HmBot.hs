@@ -77,7 +77,6 @@ handlePost p = do
   cardNames <- ExceptT . pure $ mapLeft (ParseFailure . errorMessages) $ commands p
   cardData  <- lift lookupCard  
 
-
 commands :: SlackPost -> Either ParseError [Text]
 commands p = parse allBracketed (text p) (text p)
 
@@ -108,11 +107,21 @@ bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
 --    "gatherer":"http:\/\/gatherer.wizards.com\/Handlers\/Image.ashx?type=card&multiverseid=209",
 --    "mtgimage":"http:\/\/mtgimage.com\/set\/LEA\/lightning bolt.jpg"
 --   },"layout":"normal","legalities":[{"format":"Commander","legality":"Legal"},{"format":"Freeform","legality":"Legal"},{"format":"Legacy","legality":"Legal"},{"format":"Modern","legality":"Legal"},{"format":"Prismatic","legality":"Legal"},{"format":"Singleton 100","legality":"Legal"},{"format":"Tribal Wars Legacy","legality":"Legal"},{"format":"Vintage","legality":"Legal"}],"life":null,"links":{"set":"http:\/\/api.mtgapi.com\/v2\/sets?code=LEA"},"loyalty":null,"manaCost":"{R}","multiverseid":209,"name":"Lightning Bolt","names":null,"number":null,"originalText":"Lightning Bolt does 3 damage to one target.","originalType":"Instant","power":null,"printings":["LEA","LEB","2ED","CED","CEI","3ED","4ED","pJGP","ATH","BTD","pMPR","MED","M10","M11","PD2","MM2"],"rarity":"Common","rulings":null,"set":"LEA","subtypes":null,"supertypes":null,"text":"Lightning Bolt deals 3 damage to target creature or player.","toughness":null,"type":"Instant","types":["Instant"],"variations":null,"watermark":null}],"total":16,"perPage":20,"links":{"first":"http:\/\/api.mtgapi.com\/v2\/cards?name=Lightning Bolt","previous":null,"current":"http:\/\/api.mtgapi.com\/v2\/cards?page=1&name=Lightning Bolt","next":null,"last":"http:\/\/api.mtgapi.com\/v2\/cards?page=1&name=Lightning Bolt"}}
-lookupCard :: Text -> IO Value
-lookupCard cardName = 
+
+lookupCard :: Text -> IO Card
+lookupCard cardName = do
   let opts = defaults & param "name" .~ [cardName]
-  in  asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
+  body <- asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
+  pure $ 
   let cardRecord = cardData ^. (key "cards" . nth 0)
-      multiverseId = cardRecord ^. key "
+      multiverseId = cardRecord ^. key "multiverseid"
+      gathererImage = cardRecord ^. (key "images" . key "gatherer")
+  in  Card <$> cardRecord <*> multiverseId <*> gathererImage
+
+data Card = Card
+  { raw :: Value
+  , multiverseId :: Text
+  , gathererImage :: Text
+  }
 
   
