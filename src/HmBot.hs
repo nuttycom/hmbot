@@ -1,14 +1,19 @@
 {-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
+{-# LANGUAGE DeriveGeneric #-}
+
 module HmBot 
   --(runApp, app) 
   where
 
-import           Control.Lens ((&), (.~))
+import           Control.Error.Util
+import           Control.Lens ((&), (.~), (^.))
 import           Control.Monad.Except
 import           Control.Monad.IO.Class
 
-import           Data.Aeson (Value(..), object, (.=))
+import           Data.Aeson (Value(..), ToJSON(..), FromJSON(..), (.:), (.=), object) 
+import           Data.Aeson.Lens
 import           Data.Either.Combinators (mapLeft)
+import           Data.Semigroup ((<>))
 import qualified Data.Map.Lazy as M
 import           Data.Text
 
@@ -31,8 +36,17 @@ app' :: S.ScottyM ()
 app' = do
   S.post "/" $ do
     request <- readPost
-    response <- liftIO $ handlePost request
-    S.json $ M.singleton ("text" :: Text) response
+    response <- liftIO . runExceptT $ handlePost request
+    S.json $ either reportError id response
+
+reportError :: HmError -> SlackResponse
+reportError (ParseFailure messages) = 
+  let errText = "Errors encountered parsing request: " <> intercalate ";" ((pack . messageString) <$> messages)
+  in  SlackResponse "mtg" True errText []
+
+reportError (NotFound xs) = 
+  let errText = "Cards not found: " <> (intercalate ", " xs)
+  in  SlackResponse "mtg" True errText []
     
 -- Request form data:
 --token=XXXXXXXXXXXXXXXXXX
@@ -45,7 +59,7 @@ app' = do
 --user_name=Steve
 --text=googlebot: What is the air-speed velocity of an unladen swallow?
 --trigger_word=googlebot:
-data SlackPost = SlackPost
+data SlackRequest = SlackRequest
   { token :: Text
   , teamId :: Text
   , teamDomain :: Text
@@ -59,11 +73,38 @@ data SlackPost = SlackPost
 data HmError 
   = ParseFailure [Message]
   | NotFound [Text]
-  
      
-readPost :: S.ActionM SlackPost
+data SlackAttachment = SlackAttachment 
+  { title :: Text
+  , title_link :: Text
+  , image_url :: Text
+  }
+
+instance ToJSON SlackAttachment where
+  toJSON (SlackAttachment t l u) = 
+    object [ "title" .= t
+           , "title_link" .= l
+           , "image_url" .= u
+           ]
+
+data SlackResponse = SlackResponse
+  { channel :: Text
+  , as_user :: Bool
+  , message :: Text
+  , attachments :: [SlackAttachment]
+  }
+
+instance ToJSON SlackResponse where
+  toJSON (SlackResponse c _ m a) = 
+    object [ "channel" .= c
+           , "as_user" .= True
+           , "text" .= m
+           , "attachments" .= a
+           ]
+
+readPost :: S.ActionM SlackRequest
 readPost = 
-  SlackPost <$> S.param "token"
+  SlackRequest <$> S.param "token"
             <*> S.param "team_id"
             <*> S.param "team_domain"
             <*> S.param "channel_id"
@@ -72,13 +113,27 @@ readPost =
             <*> S.param "text"
             <*> S.param "trigger_word"
 
-handlePost :: SlackPost -> ExceptT HmError IO Text
+handlePost :: SlackRequest -> ExceptT HmError IO SlackResponse
 handlePost p = do
-  cardNames <- ExceptT . pure $ mapLeft (ParseFailure . errorMessages) $ commands p
-  cardData  <- lift lookupCard  
+  cardNames <- hoistEither . mapLeft (ParseFailure . errorMessages) $ commands p
+  cards  <- lift $ traverse lookupCard cardNames
+  pure $ slackResponse "mtg" cards
 
-commands :: SlackPost -> Either ParseError [Text]
-commands p = parse allBracketed (text p) (text p)
+slackResponse :: Text -> [Card] -> SlackResponse
+slackResponse channel cards = SlackResponse channel True "" (cardAttachment <$> cards)
+
+cardAttachment :: Card -> SlackAttachment
+cardAttachment c = 
+  SlackAttachment 
+    (name c) 
+    ("http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=" <> multiverseId c)
+    (gathererImage c)
+
+
+commands :: SlackRequest -> Either ParseError [Text]
+commands req = 
+  let input = text req
+  in  parse allBracketed (unpack input) input
 
 allBracketed :: Parser [Text]
 allBracketed = many (ignored *> bracketed <* ignored)
@@ -98,30 +153,26 @@ bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
 
 --   slack.api("chat.postMessage", {channel: data.channel, as_user: true, text: ' ', attachments: attachments}
 
---{
--- "query":[{"command":"where","key":"name","conditional":"=","value":"Lightning Bolt"}],
--- "cards":[
--- {"artist":"Christopher Rush",
---  "border":"black","cmc":1,"colors":["Red"],"flavor":null,"foreignNames":null,"hand":null,
---  "images":{
---    "gatherer":"http:\/\/gatherer.wizards.com\/Handlers\/Image.ashx?type=card&multiverseid=209",
---    "mtgimage":"http:\/\/mtgimage.com\/set\/LEA\/lightning bolt.jpg"
---   },"layout":"normal","legalities":[{"format":"Commander","legality":"Legal"},{"format":"Freeform","legality":"Legal"},{"format":"Legacy","legality":"Legal"},{"format":"Modern","legality":"Legal"},{"format":"Prismatic","legality":"Legal"},{"format":"Singleton 100","legality":"Legal"},{"format":"Tribal Wars Legacy","legality":"Legal"},{"format":"Vintage","legality":"Legal"}],"life":null,"links":{"set":"http:\/\/api.mtgapi.com\/v2\/sets?code=LEA"},"loyalty":null,"manaCost":"{R}","multiverseid":209,"name":"Lightning Bolt","names":null,"number":null,"originalText":"Lightning Bolt does 3 damage to one target.","originalType":"Instant","power":null,"printings":["LEA","LEB","2ED","CED","CEI","3ED","4ED","pJGP","ATH","BTD","pMPR","MED","M10","M11","PD2","MM2"],"rarity":"Common","rulings":null,"set":"LEA","subtypes":null,"supertypes":null,"text":"Lightning Bolt deals 3 damage to target creature or player.","toughness":null,"type":"Instant","types":["Instant"],"variations":null,"watermark":null}],"total":16,"perPage":20,"links":{"first":"http:\/\/api.mtgapi.com\/v2\/cards?name=Lightning Bolt","previous":null,"current":"http:\/\/api.mtgapi.com\/v2\/cards?page=1&name=Lightning Bolt","next":null,"last":"http:\/\/api.mtgapi.com\/v2\/cards?page=1&name=Lightning Bolt"}}
-
 lookupCard :: Text -> IO Card
-lookupCard cardName = do
+lookupCard cardName = 
   let opts = defaults & param "name" .~ [cardName]
-  body <- asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
-  pure $ 
-  let cardRecord = cardData ^. (key "cards" . nth 0)
-      multiverseId = cardRecord ^. key "multiverseid"
-      gathererImage = cardRecord ^. (key "images" . key "gatherer")
-  in  Card <$> cardRecord <*> multiverseId <*> gathererImage
+  in  do 
+    r <- asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
+    pure $ r ^. responseBody
 
 data Card = Card
   { raw :: Value
+  , name :: Text
   , multiverseId :: Text
   , gathererImage :: Text
   }
 
-  
+instance FromJSON Card where
+  parseJSON o@(Object v) = 
+    Card <$> pure o
+         <*> v .: "name"
+         <*> v .: "multiverseid"
+         <*> ((v .: "images") >>= (.: "gatherer"))
+
+  parseJSON _ = mzero
+

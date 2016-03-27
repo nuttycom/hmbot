@@ -20,9 +20,12 @@ library
                      , aeson
                      , containers
                      , lens
+                     , lens-aeson
                      , either
+                     , errors
                      , mtl
                      , parsec
+                     , semigroups
                      , scotty
                      , text
                      , transformers
