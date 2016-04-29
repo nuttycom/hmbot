@@ -8,13 +8,17 @@ resolver: lts-5.8
 packages:
 - '.'
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
-extra-deps: []
+extra-deps: 
+  - slack-api-0.7
 
 # Override default flag values for local packages and extra-deps
 flags: {}
 
 # Extra package databases containing global packages
 extra-package-dbs: []
+
+# Path for binaries:
+local-bin-path: ./bin
 
 # Control whether we use the GHC we find on the path
 # system-ghc: true
@@ -33,3 +37,9 @@ extra-package-dbs: []
 
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+
+image:
+  container:
+    base: fpco/stack-run
+    entrypoints:
+      - hmbot-exe

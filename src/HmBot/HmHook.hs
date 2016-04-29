@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module HmBot 
-  --(runApp, app) 
+module HmBot.HmHook
   where
 
 import           Control.Error.Util
@@ -17,17 +16,16 @@ import           Data.Semigroup ((<>))
 import qualified Data.Map.Lazy as M
 import           Data.Text
 
-import           Text.Parsec (many, manyTill, parse, skipMany)
-import           Text.Parsec.Error
-import           Text.Parsec.Text
-import           Text.Parsec.Char (char, noneOf, anyChar)
-
 import           Network.Wai (Application)
-import           Network.Wreq
+
+import           Text.Parsec.Error
+
 import qualified Web.Scotty as S
 
-runApp :: IO ()
-runApp = S.scotty 8080 app'
+import           HmBot.MTGAPI
+
+run :: IO ()
+run = S.scotty 8080 app'
 
 app :: IO Application
 app = S.scottyApp app'
@@ -115,7 +113,7 @@ readPost =
 
 handlePost :: SlackRequest -> ExceptT HmError IO SlackResponse
 handlePost p = do
-  cardNames <- hoistEither . mapLeft (ParseFailure . errorMessages) $ commands p
+  cardNames <- hoistEither . mapLeft (ParseFailure . errorMessages) $ commands (text p)
   cards  <- lift $ traverse lookupCard cardNames
   pure $ slackResponse "mtg" cards
 
@@ -126,53 +124,6 @@ cardAttachment :: Card -> SlackAttachment
 cardAttachment c = 
   SlackAttachment 
     (name c) 
-    ("http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=" <> multiverseId c)
+    (gathererImageUrl c)
     (gathererImage c)
-
-
-commands :: SlackRequest -> Either ParseError [Text]
-commands req = 
-  let input = text req
-  in  parse allBracketed (unpack input) input
-
-allBracketed :: Parser [Text]
-allBracketed = many (ignored *> bracketed <* ignored)
-
-ignored :: Parser ()
-ignored = skipMany (noneOf "[")
-
-bracketed :: Parser Text
-bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
-
--- var attachments = 
---   JSON.stringify([{
---   title: bestMatch.doc.name,
---   title_link: 'http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid='+card.multiverseid,
---   image_url: card.images.gatherer
---   }]);
-
---   slack.api("chat.postMessage", {channel: data.channel, as_user: true, text: ' ', attachments: attachments}
-
-lookupCard :: Text -> IO Card
-lookupCard cardName = 
-  let opts = defaults & param "name" .~ [cardName]
-  in  do 
-    r <- asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
-    pure $ r ^. responseBody
-
-data Card = Card
-  { raw :: Value
-  , name :: Text
-  , multiverseId :: Text
-  , gathererImage :: Text
-  }
-
-instance FromJSON Card where
-  parseJSON o@(Object v) = 
-    Card <$> pure o
-         <*> v .: "name"
-         <*> v .: "multiverseid"
-         <*> ((v .: "images") >>= (.: "gatherer"))
-
-  parseJSON _ = mzero
 

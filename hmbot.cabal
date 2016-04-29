@@ -4,7 +4,6 @@ synopsis:            A slack bot for retrieving MTG card data.
 description:         Please see README.md
 homepage:            http://github.com/nuttycom/hmbot#readme
 license:             BSD3
-license-file:        LICENSE
 author:              Kris Nuttycombe
 maintainer:          kris@nutty.land
 copyright:           2016 Kris Nuttycombe
@@ -15,7 +14,10 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     HmBot
+  exposed-modules:     HmBot.HmBot
+                     , HmBot.HmHook
+                     , HmBot.MTGAPI
+
   build-depends:       base >= 4.7 && < 5
                      , aeson
                      , containers
@@ -27,6 +29,7 @@ library
                      , parsec
                      , semigroups
                      , scotty
+                     , slack-api
                      , text
                      , transformers
                      , wai

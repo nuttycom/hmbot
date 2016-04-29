@@ -1,6 +1,6 @@
 module Main where
 
-import           HmBot (runApp)
+import           HmBot.HmBot (run)
 
 main :: IO ()
-main = runApp
+main = run
