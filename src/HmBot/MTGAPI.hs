@@ -4,14 +4,32 @@
 module HmBot.MTGAPI 
   where
 
-import           Control.Lens ((&), (.~), (^.))
+import           Control.Lens ((&), (.~), (^.), (^?))
 import           Control.Monad (mzero)
 
-import           Data.Aeson (Value(..), ToJSON(..), FromJSON(..), (.:), (.=), object) 
-import           Data.Aeson.Lens
+import           Data.Aeson 
+  ( Value(..)
+  , ToJSON(..)
+  , FromJSON(..)
+  , Result(..)
+  , (.:)
+  , (.:?)
+  , (.=)
+  , object
+  )
+
+import Data.Aeson.Types
+  ( parseMaybe
+  , parseEither
+  , parseJSON
+  ) 
+import           Data.Aeson.Lens (key)
+
+import           Data.Maybe (fromMaybe)
 import           Data.Semigroup ((<>))
 import qualified Data.Map.Lazy as M
 import           Data.Text
+import           Debug.Trace
 
 import           Text.Parsec (many, manyTill, parse, skipMany)
 import           Text.Parsec.Error
@@ -42,29 +60,31 @@ bracketed = pack <$> (char '[' >> manyTill anyChar (char ']'))
 
 --   slack.api("chat.postMessage", {channel: data.channel, as_user: true, text: ' ', attachments: attachments}
 
-lookupCard :: Text -> IO Card
+lookupCard :: Text -> IO [Card]
 lookupCard cardName = 
   let opts = defaults & param "name" .~ [cardName]
   in  do 
-    r <- asJSON =<< getWith opts "http://api.mtgapi.com/v2/cards"
-    pure $ r ^. responseBody
+    r <- getWith opts "http://api.mtgapi.com/v2/cards"
+    rjson <- asValue r
+    let cardsv = rjson ^? responseBody . key "cards" 
+    either error pure $ parseEither parseJSON =<< maybe (Left "\"cards\" not found") Right cardsv
 
 gathererImageUrl :: Card -> Text
 gathererImageUrl c = 
-  "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=" <> multiverseId c
+  "http://gatherer.wizards.com/Pages/Card/Details.aspx?multiverseid=" <> (pack . show) (multiverseId c)
 
 data Card = Card
   { raw :: Value
   , name :: Text
-  , multiverseId :: Text
-  , gathererImage :: Text
-  }
+  , multiverseId :: Int
+  , gathererImage :: Maybe Text
+  } deriving (Show)
 
 instance FromJSON Card where
   parseJSON o@(Object v) = 
     Card <$> pure o
          <*> v .: "name"
          <*> v .: "multiverseid"
-         <*> ((v .: "images") >>= (.: "gatherer"))
+         <*> ((v .: "images") >>= (.:? "gatherer"))
 
   parseJSON _ = mzero

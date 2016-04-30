@@ -75,7 +75,7 @@ data HmError
 data SlackAttachment = SlackAttachment 
   { title :: Text
   , title_link :: Text
-  , image_url :: Text
+  , image_url :: Maybe Text
   }
 
 instance ToJSON SlackAttachment where
@@ -115,7 +115,7 @@ handlePost :: SlackRequest -> ExceptT HmError IO SlackResponse
 handlePost p = do
   cardNames <- hoistEither . mapLeft (ParseFailure . errorMessages) $ commands (text p)
   cards  <- lift $ traverse lookupCard cardNames
-  pure $ slackResponse "mtg" cards
+  pure $ slackResponse "mtg" (join cards)
 
 slackResponse :: Text -> [Card] -> SlackResponse
 slackResponse channel cards = SlackResponse channel True "" (cardAttachment <$> cards)
